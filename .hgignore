@@ -1,0 +1,24 @@
+syntax: glob
+
+*.dol
+*.elf
+*.o
+*.tar.gz
+*.zip
+*~
+.deps
+.dirstamp
+aclocal.m4
+aminclude.am
+autom4te.cache
+build-aux
+compile_flags.txt
+config.h
+config.h.in
+config.log
+config.status
+configure
+hbc/meta.xml
+Makefile
+Makefile.in
+stamp-h1

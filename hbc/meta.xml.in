@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<app version="1">
+  <name>@PACKAGE_NAME@</name>
+  <version>@PACKAGE_VERSION@</version>
+  <coder>Daniel K. O.</coder>
+  <short_description>Reads data from a USB Gecko connected to slot A.</short_description>
+  <long_description>This app reads data from a USB Gecko connected on memory card slot A. The data is shown on screen and broadcast to UDP port 4405 (to be read with udplogserver).</long_description>
+</app>
