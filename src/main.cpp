@@ -176,15 +176,21 @@ int main()
             static char buf[1200 + 1];
             int r = usb_recvbuffer(0, buf, (sizeof buf) - 1);
             if (r > 0) {
+                bool all_ff = true;
+
                 buf[r] = '\0';
 
-                if (replace_eol)
-                    for (int i = 0; i < r; ++i)
-                        if (buf[i] == '\r')
-                            buf[i] = '\n';
+                for (int i = 0; i < r; ++i) {
+                    if (buf[i] != 0xff)
+                        all_ff = false;
+                    if (replace_eol && buf[i] == '\r')
+                        buf[i] = '\n';
+                }
 
-                std::fputs(buf, stdout);
-                log_send(buf, r);
+                if (!all_ff) {
+                    std::fputs(buf, stdout);
+                    log_send(buf, r);
+                }
             }
 
             redraw_console();
