@@ -7,17 +7,11 @@
 #include <network.h>
 #include <wiiuse/wpad.h>
 
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
-
-#ifdef HAVE_DEVKITPRO_WII_LIBGXFLUX
-#define USE_LIBGXFLUX
-#endif
-
-#ifdef USE_LIBGXFLUX
 #include <gxflux/gfx.h>
 #include <gxflux/gfx_con.h>
+
+#ifdef HAVE_CONFIG_H
+#include <config.h>
 #endif
 
 
@@ -27,13 +21,12 @@ redraw_console()
     std::fflush(stdout);
 
     VIDEO_WaitVSync();
-#ifdef USE_LIBGXFLUX
+
     if (gfx_frame_start()) {
         gfx_con_draw();
         gfx_frame_end();
     }
     VIDEO_Flush();
-#endif
 }
 
 
@@ -117,7 +110,6 @@ int main()
     WPAD_Init();
     PAD_Init();
 
-#ifdef USE_LIBGXFLUX
     gfx_video_init(nullptr);
     gfx_init();
     gfx_screen_coords_t coords {
@@ -127,28 +119,8 @@ int main()
         gfx_video_get_height() - 16.0f
     };
     gfx_con_init(&coords);
-#else
-    GXRModeObj* mode = VIDEO_GetPreferredMode(nullptr);
 
-    void* fb = MEM_K0_TO_K1(SYS_AllocateFramebuffer(mode));
-    VIDEO_Configure(mode);
-    VIDEO_SetNextFramebuffer(fb);
-
-    unsigned stride = VIDEO_PadFramebufferWidth(mode->fbWidth) * VI_DISPLAY_PIX_SZ;
-    CON_Init(fb,
-             8, 16,
-             mode->fbWidth, mode->xfbHeight,
-             stride);
-
-    VIDEO_SetBlack(false);
-    VIDEO_Flush();
-#endif
-
-#ifdef USE_LIBGXFLUX
-    std::printf("%s using libgxflux\n", PACKAGE_STRING);
-#else
     std::printf("%s\n", PACKAGE_STRING);
-#endif
 
     if (!log_init())
         goto error;
@@ -162,7 +134,7 @@ int main()
     redraw_console();
 
     {
-        bool replace_eol = false;
+        bool replace_eol = true;
         bool running = true;
 
         auto toggle_replace_eol = [&replace_eol]
@@ -225,11 +197,9 @@ int main()
     net_deinit();
 
 
-#ifdef USE_LIBGXFLUX
     gfx_con_deinit();
     gfx_deinit();
     gfx_video_deinit();
-#endif
     return 0;
 
 
@@ -239,10 +209,8 @@ int main()
         redraw_console();
 
     net_deinit();
-#ifdef USE_LIBGXFLUX
     gfx_con_deinit();
     gfx_deinit();
     gfx_video_deinit();
-#endif
     return -1;
 }
