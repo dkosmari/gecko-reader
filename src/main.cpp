@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <array>
 #include <cstdio>
-#include <cstring>
+#include <stdexcept>
+#include <string>
 
 #include <gccore.h>
 #include <network.h>
@@ -10,9 +12,59 @@
 #include <gxflux/gfx.h>
 #include <gxflux/gfx_con.h>
 
+#include "socket.hpp"
+
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
+
+
+using namespace std::literals;
+
+using std::runtime_error;
+using std::array;
+
+
+struct gfx_raii {
+
+    gfx_raii()
+        noexcept
+    {
+        gfx_video_init(nullptr);
+        gfx_init();
+    }
+
+    ~gfx_raii()
+        noexcept
+    {
+        gfx_deinit();
+        gfx_video_deinit();
+    }
+
+};
+
+
+struct gfx_con_raii {
+
+    gfx_con_raii()
+    {
+        gfx_screen_coords_t coords {
+            16.0f,
+            32.0f,
+            gfx_video_get_width() - 16.0f,
+            gfx_video_get_height() - 32.0f
+        };
+        if (!gfx_con_init(&coords))
+            throw runtime_error{"gfx_con_init() failed."};
+    }
+
+    ~gfx_con_raii()
+        noexcept
+    {
+        gfx_con_deinit();
+    }
+
+};
 
 
 void
@@ -30,77 +82,160 @@ redraw_console()
 }
 
 
-static int log_fd = -1;
-static struct sockaddr_in bcast_addr;
-
-bool
-log_init()
+std::string
+to_string(in_addr addr)
 {
-    std::printf("Initializing network... ");
-    redraw_console();
-
-    int net_status = net_init();
-    if (net_status) {
-        std::printf("failed: (%d) %s\n", net_status, std::strerror(-net_status));
-        redraw_console();
-        return false;
-    }
-    std::printf("OK.\n");
-    redraw_console();
-
-    log_fd = net_socket(AF_INET, SOCK_DGRAM, 0);
-    if (log_fd < 0)
-        return false;
-
-#if 0
-    // Note: it doesn't appear the Wii understands the SO_BROADCAST option at all.
-    std::printf("Setting UDP log fd up for broadcast... ");
-    redraw_console();
-
-    unsigned enable = 1;
-    int opt_status = net_setsockopt(log_fd,
-                                    SOL_SOCKET,
-                                    SO_BROADCAST,
-                                    &enable,
-                                    sizeof enable);
-    if (opt_status < 0)
-        std::printf("failed: (%d) %s\n", opt_status, std::strerror(-opt_status));
-    else
-        std::printf("OK.\n");
-    redraw_console();
-#endif
-
-    std::memset(&bcast_addr, 0, sizeof bcast_addr);
-    bcast_addr.sin_family = AF_INET;
-    bcast_addr.sin_port = htons(4405);
-    bcast_addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-
-    // Note: the only way to get the Wii to send to broadcast address is with
-    // net_connect().
-    std::printf("Broadcasting to UDP port %d... ", ntohs(bcast_addr.sin_port));
-    redraw_console();
-
-    int con_status = net_connect(log_fd,
-                                 reinterpret_cast<struct sockaddr*>(&bcast_addr),
-                                 sizeof bcast_addr);
-    if (con_status < 0)
-        std::printf("net_connect() failed: (%d) %s\n",
-                    con_status, std::strerror(-con_status));
-    else
-        std::printf("OK\n");
-    redraw_console();
-
-    return true;
+    return inet_ntoa(addr);
 }
 
 
 void
-log_send(const char* buf, int size)
+main_loop()
 {
-    if (log_fd == -1 || size <= 0)
-        return;
+    bool replace_eol = true;
+    bool running = true;
 
-    net_send(log_fd, buf, size, 0);
+    std::printf("Initializing network...\n");
+    redraw_console();
+    net::init_guard net_guard;
+
+    net::socket server{AF_INET, SOCK_STREAM};
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(4405);
+    server.bind(addr);
+    server.listen(1);
+
+    in_addr host_addr{ net_gethostip() };
+    std::printf("Listening to TCP connections on %s:%u\n",
+                to_string(host_addr).c_str(),
+                unsigned(ntohs(addr.sin_port)));
+    redraw_console();
+
+    net::socket client;
+
+    std::printf("Press 1/X to toggle replacing EOL ('\\r' -> '\\n')\n");
+    std::printf("Press RESET/HOME/START to exit.\n");
+
+    if (!usb_isgeckoalive(0))
+        std::printf("WARNING: no gecko detected on slot A\n");
+
+    auto toggle_replace_eol = [&replace_eol]
+    {
+        replace_eol = !replace_eol;
+        std::printf(":: replace_eol is %s\n", replace_eol ? "true" : "false");
+    };
+
+    while (running) {
+
+        if (SYS_ResetButtonDown()) {
+            std::printf("RESET pressed, exiting...\n");
+            running = false;
+        }
+
+        PAD_ScanPads();
+        u32 gpressed = PAD_ButtonsDown(PAD_CHAN0);
+        if (gpressed) {
+            if (gpressed & PAD_BUTTON_START) {
+                running = false;
+                std::printf("GC START pressed, exiting...\n");
+            }
+            if (gpressed & PAD_BUTTON_X)
+                toggle_replace_eol();
+        }
+
+        WPAD_ScanPads();
+        u32 wpressed = WPAD_ButtonsDown(WPAD_CHAN_0);
+        if (wpressed) {
+            if (wpressed & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) {
+                running = false;
+                std::printf("Wiimote HOME pressed, exiting...\n");
+            }
+            if (wpressed & (WPAD_BUTTON_1 | WPAD_CLASSIC_BUTTON_X))
+                toggle_replace_eol();
+        }
+
+
+        if (server.is_readable()) {
+            try {
+                sockaddr_in addr;
+                client = server.accept(addr);
+
+                std::printf("Client connected from %s\n",
+                            to_string(addr.sin_addr).c_str());
+                redraw_console();
+            }
+            catch (std::exception& e) {
+                std::printf("Failed: %s\n", e.what());
+                redraw_console();
+            }
+        }
+
+
+        if (client && client.is_readable()) {
+            try {
+                static array<char, 4096> client_buf;
+                const int r = client.recv(client_buf.data(), client_buf.size() - 1);
+                if (r > 0) {
+                    client_buf[r] = '\0';
+
+                    if (replace_eol) {
+                        for (int idx = 0; idx < r; ++idx)
+                            if (client_buf[idx] == '\n')
+                                client_buf[idx] = '\r';
+                    }
+
+                    int s = usb_sendbuffer_safe(0, client_buf.data(), r);
+                    if (s < r) {
+                        std::printf("ERROR: could not send all data to gecko: %d < %d\n",
+                                    s, r);
+                        redraw_console();
+                    }
+                } else if (r == 0) {
+                    client.close();
+                    std::printf("\nClosed client connection.\n");
+                    redraw_console();
+                }
+            }
+            catch (std::exception& e) {
+                std::printf("Client handling error: %s\n", e.what());
+                redraw_console();
+            }
+        }
+
+
+        static array<char, 4096> usb_buf;
+
+        int r = usb_recvbuffer(0, usb_buf.data(), usb_buf.size() - 1);
+        if (r > 0) {
+            usb_buf[r] = '\0';
+
+            for (int i = 0; i < r; ++i) {
+                char& c = usb_buf[i];
+
+                // Stop on first 0xff, usually means unpowered/disconnected Gecko.
+                if (c == 0xff) {
+                    c ='\0';
+                    r = i;
+                    continue;
+                }
+
+                // Replace EOL if requested.
+                if (replace_eol && c == '\r')
+                    c = '\n';
+            }
+
+            // r might have changed if we encountered 0xff
+            if (r) {
+                std::fputs(usb_buf.data(), stdout);
+                if (client)
+                    client.send_all(usb_buf.data(), r);
+            }
+        }
+
+        redraw_console();
+    }
 }
 
 
@@ -109,114 +244,19 @@ int main()
     VIDEO_Init();
     WPAD_Init();
     PAD_Init();
+    gfx_raii gfx_guard;
+    gfx_con_raii gfx_con_guard;
 
-    gfx_video_init(nullptr);
-    gfx_init();
-    gfx_screen_coords_t coords {
-        16.0f,
-        16.0f,
-        gfx_video_get_width() - 16.0f,
-        gfx_video_get_height() - 16.0f
-    };
-    gfx_con_init(&coords);
+    try {
+        std::printf("%s\n", PACKAGE_STRING);
 
-    std::printf("%s\n", PACKAGE_STRING);
+        main_loop();
 
-    if (!log_init())
-        goto error;
-
-    std::printf("Press 1/X to toggle replacing EOL ('\\r' -> '\\n')\n");
-    std::printf("Press RESET/HOME/START to exit.\n");
-
-    if (!usb_isgeckoalive(0))
-        std::printf("WARNING: no gecko detected on slot A\n");
-
-    redraw_console();
-
-    {
-        bool replace_eol = true;
-        bool running = true;
-
-        auto toggle_replace_eol = [&replace_eol]
-        {
-            replace_eol = !replace_eol;
-            std::printf(":: replace_eol is %s\n", replace_eol ? "true" : "false");
-        };
-
-        while (running) {
-
-            if (SYS_ResetButtonDown()) {
-                std::printf("RESET pressed, exiting...\n");
-                running = false;
-            }
-
-            PAD_ScanPads();
-            u32 gpressed = PAD_ButtonsDown(PAD_CHAN0);
-            if (gpressed) {
-                if (gpressed & PAD_BUTTON_START) {
-                    running = false;
-                    std::printf("GC START pressed, exiting...\n");
-                }
-                if (gpressed & PAD_BUTTON_X)
-                    toggle_replace_eol();
-            }
-
-            WPAD_ScanPads();
-            u32 wpressed = WPAD_ButtonsDown(WPAD_CHAN_0);
-            if (wpressed) {
-                if (wpressed & (WPAD_BUTTON_HOME | WPAD_CLASSIC_BUTTON_HOME)) {
-                    running = false;
-                    std::printf("Wiimote HOME pressed, exiting...\n");
-                }
-                if (wpressed & (WPAD_BUTTON_1 | WPAD_CLASSIC_BUTTON_X))
-                    toggle_replace_eol();
-            }
-
-            // Note: keep buf below the MTU, so we don't have problems with the UDP packet
-            static char buf[1200 + 1];
-            int r = usb_recvbuffer(0, buf, (sizeof buf) - 1);
-            if (r > 0) {
-                bool all_ff = true;
-
-                buf[r] = '\0';
-
-                for (int i = 0; i < r; ++i) {
-                    if (buf[i] != 0xff)
-                        all_ff = false;
-                    if (replace_eol && buf[i] == '\r')
-                        buf[i] = '\n';
-                }
-
-                if (!all_ff) {
-                    std::fputs(buf, stdout);
-                    log_send(buf, r);
-                }
-            }
-
-            redraw_console();
-        }
     }
-
-    if (log_fd != -1)
-        net_close(log_fd);
-
-    net_deinit();
-
-
-    gfx_con_deinit();
-    gfx_deinit();
-    gfx_video_deinit();
-    return 0;
-
-
- error:
-
-    for (int i = 0; i < 300; ++i)
-        redraw_console();
-
-    net_deinit();
-    gfx_con_deinit();
-    gfx_deinit();
-    gfx_video_deinit();
-    return -1;
+    catch (std::exception& e) {
+        std::printf("\nERROR: %s\n", e.what());
+        for (int i = 0; i < 600; ++i)
+            redraw_console();
+        return -1;
+    }
 }

@@ -6,14 +6,21 @@ EXTRA_DIST = \
 
 
 AM_CPPFLAGS = $(DEVKITPRO_CPPFLAGS)
-AM_CXXFLAGS = $(DEVKITPRO_CXXFLAGS)
+
+AM_CXXFLAGS = \
+	-Wall -Wextra -Werror \
+	$(DEVKITPRO_CXXFLAGS)
+
 AM_LDFLAGS = $(DEVKITPRO_LDFLAGS)
+
 LIBS = $(DEVKITPRO_LIBS)
 
 
 noinst_PROGRAMS = gecko-reader.elf
 
-gecko_reader_elf_SOURCES = src/main.cpp
+gecko_reader_elf_SOURCES = \
+	src/main.cpp \
+	src/socket.cpp src/socket.hpp
 
 DOL_FILE = gecko-reader.dol
 

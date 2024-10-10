@@ -1,17 +1,28 @@
 # Gecko Reader
 
-This is a Wii homebrew app to read data from a USB Gecko.
+This is a Wii homebrew app to read and print data from a USB Gecko.
 
-The USB Gecko must be connected to slot A. The data is printed to the screen and also
-broadcast to UDP port 4405; you can receive the UDP broadcast using `udplogserver`.
+The USB Gecko must be connected to slot A.
+
+This app will also listen for TCP connections on port 4405. This connection is
+bi-directional; any data sent to this port will be written to the USB Gecko.
 
 
-# Usage
+## Usage
 
 Press HOME or START to quit the app.
 
-Pressing 1/X will enable translation of end-of-line characters, from `\r` to `\n`. Most
+Pressing 1/X will toggle translation of end-of-line characters, from `\r` to `\n`. Most
 terminals expect `\n` to be the EOL character.
+
+
+### Example: accessing the COS Shell on a Wii U
+
+Assuming you have the `socat` package installed, run:
+
+    socat READLINE TCP:wii:4405
+
+Where `wii` is the address of your Wii console on your local network.
 
 
 ## Build instructions
