@@ -5,16 +5,9 @@ EXTRA_DIST = \
 	hbc/
 
 
-AM_CPPFLAGS = $(DEVKITPRO_CPPFLAGS)
+AM_CXXFLAGS = -Wall -Wextra -Werror
 
-AM_CXXFLAGS = \
-	-Wall -Wextra -Werror \
-	$(DEVKITPRO_CXXFLAGS)
-
-AM_LDFLAGS = $(DEVKITPRO_LDFLAGS)
-
-LIBS = $(DEVKITPRO_LIBS)
-
+LDADD = -lgxflux
 
 noinst_PROGRAMS = gecko-reader.elf
 
@@ -30,7 +23,7 @@ all-local: $(DOL_FILE)
 .PHONY: run
 run: $(DOL_FILE)
 	WIILOAD=tcp:wii wiiload $<
-
+	@echo "now run: socat READLINE TCP:wii:4405"
 
 ZIP_FILE = gecko-reader.zip
 ZIP_DIR = $(ZIP_FILE:.zip=)
